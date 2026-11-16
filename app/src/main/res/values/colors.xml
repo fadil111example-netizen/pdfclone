@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink_900">#FF0B1020</color>
+    <color name="ink_800">#FF121A33</color>
+    <color name="ember_500">#FFFF7A45</color>
+    <color name="violet_500">#FF7A5CFF</color>
+    <color name="mist_50">#FFF7F8FC</color>
+    <color name="ic_launcher_background">#FF121A33</color>
+</resources>
