@@ -10,10 +10,14 @@ import com.lumina.pdfai.ai.SpeechScript
 import com.lumina.pdfai.ai.TtsEngine
 import com.lumina.pdfai.ai.VoiceOption
 import com.lumina.pdfai.di.Services
+import com.lumina.pdfai.pdf.OcrPipeline
 import com.lumina.pdfai.util.Format
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -43,7 +47,15 @@ data class AiReaderUiState(
     val sleepTimerMinutes: Int = 0,
     val autoFollow: Boolean = true,
     val highlightWords: Boolean = true,
-    val message: String? = null
+    val message: String? = null,
+    // OCR for scanned PDFs
+    val needsOcr: Boolean = false,
+    val ocrRunning: Boolean = false,
+    val ocrDone: Int = 0,
+    val ocrTotal: Int = 0,
+    val ocrError: String? = null,
+    val ocrApiKey: String = "",
+    val ocrMode: Int = OcrPipeline.MODE_AUTO
 )
 
 /**
@@ -93,7 +105,14 @@ class AiReaderViewModel(application: Application) : AndroidViewModel(application
     fun open(uri: String) {
         if (uri == loadedUri && script.chunks.isNotEmpty()) return
         loadedUri = uri
-        _ui.value = _ui.value.copy(uri = uri, loading = true, error = null)
+        _ui.value = _ui.value.copy(
+            uri = uri,
+            loading = true,
+            error = null,
+            needsOcr = false,
+            ocrRunning = false,
+            ocrError = null
+        )
 
         viewModelScope.launch {
             val entry = library.find(uri)
@@ -120,11 +139,22 @@ class AiReaderViewModel(application: Application) : AndroidViewModel(application
             }
 
             if (!extraction.hasText) {
+                // A scanned PDF is only images: offer OCR instead of giving up.
+                val pages = extraction.metadata.pageCount
+                val canOcr = pages > 0
                 _ui.value = _ui.value.copy(
                     loading = false,
                     hasText = false,
-                    pageCount = extraction.pages.size,
-                    error = "Dokumen ini tidak punya lapisan teks (hasil pindai/gambar). AI belum bisa membacakannya."
+                    needsOcr = canOcr,
+                    pageCount = if (canOcr) pages else extraction.pages.size,
+                    ocrTotal = pages,
+                    ocrDone = Services.ocrStore.countDone(uri, pages),
+                    ocrApiKey = settingsRepo.ocrApiKey,
+                    ocrMode = settingsRepo.ocrMode,
+                    error = if (canOcr) null else (
+                        extraction.warnings.firstOrNull()
+                            ?: "Dokumen ini tidak punya lapisan teks (hasil pindai/gambar). AI belum bisa membacakannya."
+                        )
                 )
                 return@launch
             }
@@ -175,6 +205,51 @@ class AiReaderViewModel(application: Application) : AndroidViewModel(application
             // Hands-free mode: start reading as soon as the screen has content.
             if (autoPlayOnOpen) play()
         }
+    }
+
+    private var ocrJob: Job? = null
+
+    /** Runs OCR.space over every page that has no stored text yet, then reloads the document. */
+    fun startOcr(apiKey: String, mode: Int) {
+        val key = apiKey.trim()
+        settingsRepo.ocrApiKey = key
+        settingsRepo.ocrMode = mode
+        _ui.update { it.copy(ocrApiKey = key, ocrMode = mode) }
+
+        if (key.isEmpty()) {
+            _ui.update { it.copy(ocrError = "Isi API key OCR.space terlebih dahulu.") }
+            return
+        }
+        if (ocrJob?.isActive == true) return
+
+        val uri = loadedUri
+        ocrJob = viewModelScope.launch {
+            _ui.update { it.copy(ocrRunning = true, ocrError = null) }
+            try {
+                Services.ocr.run(uri, key, mode) { done, total ->
+                    _ui.update { it.copy(ocrDone = done, ocrTotal = total) }
+                }
+                documents.invalidate(uri)
+                loadedUri = ""
+                _ui.update { it.copy(ocrRunning = false) }
+                open(uri)
+            } catch (e: CancellationException) {
+                _ui.update { it.copy(ocrRunning = false) }
+                throw e
+            } catch (e: Throwable) {
+                _ui.update {
+                    it.copy(
+                        ocrRunning = false,
+                        ocrDone = Services.ocrStore.countDone(uri, it.ocrTotal),
+                        ocrError = e.message ?: "OCR gagal"
+                    )
+                }
+            }
+        }
+    }
+
+    fun cancelOcr() {
+        ocrJob?.cancel()
     }
 
     private fun refreshVoices() {

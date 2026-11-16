@@ -334,7 +334,7 @@ fun SettingsScreen(
                     item {
                         Spacer(Modifier.height(24.dp))
                         Text(
-                            "Semua pemrosesan terjadi di perangkat. Tidak ada dokumen yang diunggah ke internet.",
+                            "Pembacaan PDF dan suara AI terjadi di perangkat. Hanya saat Anda menjalankan OCR untuk PDF hasil pindai, gambar halamannya dikirim ke OCR.space.",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

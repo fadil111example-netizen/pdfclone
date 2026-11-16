@@ -85,7 +85,8 @@ class DeviceScanner(private val context: Context) {
                 if (size <= 0) continue
                 val modified = cursor.getLong(dateCol) * 1000
 
-                target[itemUri.toString()] = PdfEntry(
+                // keyed by real path when known, so the folder walk cannot add the same file again
+                target[path ?: itemUri.toString()] = PdfEntry(
                     uri = itemUri.toString(),
                     name = name,
                     sizeBytes = size,
@@ -110,7 +111,7 @@ class DeviceScanner(private val context: Context) {
     }
 
     private fun walk(dir: File?, target: MutableMap<String, PdfEntry>, limit: Int, depth: Int) {
-        if (dir == null || !dir.isDirectory || depth > 4 || target.size >= limit) return
+        if (dir == null || !dir.isDirectory || depth > 6 || target.size >= limit) return
         val children = runCatching { dir.listFiles() }.getOrNull() ?: return
 
         children.forEach { child ->
@@ -123,7 +124,7 @@ class DeviceScanner(private val context: Context) {
             } else if (child.name.lowercase().endsWith(".pdf") && child.length() > 0) {
                 val uri = Uri.fromFile(child)
                 target.putIfAbsent(
-                    uri.toString(),
+                    child.absolutePath,
                     PdfEntry(
                         uri = uri.toString(),
                         name = child.name,

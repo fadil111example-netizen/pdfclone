@@ -7,6 +7,8 @@ import com.lumina.pdfai.ai.TtsEngine
 import com.lumina.pdfai.data.BookmarkStore
 import com.lumina.pdfai.data.DeviceScanner
 import com.lumina.pdfai.data.DocumentRepository
+import com.lumina.pdfai.data.OcrStore
+import com.lumina.pdfai.pdf.OcrPipeline
 import com.lumina.pdfai.pdf.PdfRenderEngine
 import com.lumina.pdfai.pdf.PdfSourceResolver
 import com.lumina.pdfai.pdf.PdfTextExtractor
@@ -37,7 +39,9 @@ object Services {
 
     val sourceResolver: PdfSourceResolver by lazy { PdfSourceResolver(app) }
     val textExtractor: PdfTextExtractor by lazy { PdfTextExtractor(sourceResolver) }
-    val documents: DocumentRepository by lazy { DocumentRepository(textExtractor) }
+    val ocrStore: OcrStore by lazy { OcrStore(app) }
+    val ocr: OcrPipeline by lazy { OcrPipeline(sourceResolver, ocrStore) }
+    val documents: DocumentRepository by lazy { DocumentRepository(textExtractor, ocrStore) }
     val bookmarks: BookmarkStore by lazy { BookmarkStore(app) }
     val scanner: DeviceScanner by lazy { DeviceScanner(app) }
 

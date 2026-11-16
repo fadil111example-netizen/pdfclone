@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -68,6 +69,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lumina.pdfai.data.PdfEntry
 import com.lumina.pdfai.ui.components.AuroraBackground
@@ -116,6 +119,75 @@ fun HomeScreen(
         }
     }
 
+
+    var showAccessDialog by remember { mutableStateOf(false) }
+    var waitingForAccess by remember { mutableStateOf(false) }
+
+    val pickFolder = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            viewModel.importFolder(uri)
+        }
+    }
+
+    val legacyPermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.scanDevice() else showAccessDialog = true
+    }
+
+    // Scanning needs real storage access; without it the list always comes back empty.
+    val startScan: () -> Unit = {
+        when {
+            hasAllFilesAccess(context) -> viewModel.scanDevice()
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R -> showAccessDialog = true
+            else -> legacyPermission.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+    }
+
+    // Back from the system settings screen: continue with the scan automatically.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (waitingForAccess && hasAllFilesAccess(context)) {
+            waitingForAccess = false
+            viewModel.scanDevice()
+        }
+    }
+
+    if (showAccessDialog) {
+        AlertDialog(
+            onDismissRequest = { showAccessDialog = false },
+            title = { Text("Izinkan akses ke berkas") },
+            text = {
+                Text(
+                    "Agar PDF di folder Download dan folder lain bisa ditemukan, Lumina memerlukan " +
+                        "izin “Akses semua file”. Aktifkan, lalu kembali ke aplikasi — pemindaian " +
+                        "berjalan otomatis. Lumina hanya membaca, tidak mengubah apa pun. " +
+                        "Atau pilih satu folder saja tanpa izin tambahan."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showAccessDialog = false
+                    waitingForAccess = true
+                    openAllFilesSettings(context)
+                }) { Text("Buka pengaturan") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showAccessDialog = false
+                    pickFolder.launch(null)
+                }) { Text("Pilih folder") }
+            }
+        )
+    }
+
     // One-tap explanation the first time the library is empty.
     LaunchedEffect(state.message) {
         val message = state.message ?: return@LaunchedEffect
@@ -162,7 +234,7 @@ fun HomeScreen(
                         state = state,
                         onOpenSettings = onOpenSettings,
                         onOpenAbout = onOpenAbout,
-                        onRescan = { viewModel.scanDevice() }
+                        onRescan = { startScan() }
                     )
                 }
                 item { Spacer(Modifier.height(14.dp)) }
@@ -173,7 +245,7 @@ fun HomeScreen(
                             val target = state.recent.firstOrNull() ?: state.all.firstOrNull()
                             if (target != null) onListenDocument(target.uri)
                         },
-                        onScan = { viewModel.scanDevice() },
+                        onScan = { startScan() },
                         onPick = { pickSingle.launch(arrayOf("application/pdf")) },
                         scanning = state.scanning,
                         hasDocuments = state.all.isNotEmpty()
@@ -231,7 +303,7 @@ fun HomeScreen(
                             hasAny = state.all.isNotEmpty(),
                             query = state.query,
                             onPick = { pickSingle.launch(arrayOf("application/pdf")) },
-                            onScan = { viewModel.scanDevice() }
+                            onScan = { startScan() }
                         )
                     }
                     else -> items(state.visible, key = { it.uri }) { entry ->
@@ -254,7 +326,7 @@ fun HomeScreen(
         if (state.all.isNotEmpty()) {
             FloatingBar(
                 onPick = { pickSingle.launch(arrayOf("application/pdf")) },
-                onScan = { viewModel.scanDevice() }
+                onScan = { startScan() }
             )
         }
     }
@@ -593,7 +665,7 @@ private fun LibraryFootprint(state: com.lumina.pdfai.ui.viewmodel.LibraryUiState
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "Semua proses — pembacaan PDF maupun suara AI — terjadi di perangkat Anda.",
+            "Pembacaan PDF dan suara AI berjalan di perangkat Anda. Hanya PDF hasil pindai yang, atas izin Anda, dikirim per halaman ke OCR.space.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -605,6 +677,7 @@ private fun FloatingBar(onPick: () -> Unit, onScan: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .padding(20.dp),
         contentAlignment = Alignment.BottomEnd
     ) {
@@ -627,3 +700,31 @@ private fun FloatingBar(onPick: () -> Unit, onScan: () -> Unit) {
     }
 }
 
+private fun hasAllFilesAccess(context: android.content.Context): Boolean =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        android.os.Environment.isExternalStorageManager()
+    } else {
+        androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+private fun openAllFilesSettings(context: android.content.Context) {
+    val pkg = android.net.Uri.parse("package:${context.packageName}")
+    val intents = ArrayList<android.content.Intent>()
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        intents.add(
+            android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                pkg
+            )
+        )
+    }
+    intents.add(
+        android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)
+    )
+    for (intent in intents) {
+        if (runCatching { context.startActivity(intent) }.isSuccess) return
+    }
+}

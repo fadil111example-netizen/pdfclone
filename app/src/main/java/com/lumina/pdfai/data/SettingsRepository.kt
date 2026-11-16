@@ -41,6 +41,10 @@ class SettingsRepository(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("lumina_settings", Context.MODE_PRIVATE)
 
+    /** The OCR API key lives in its own file so it can be excluded from backups. */
+    private val secretPrefs: SharedPreferences =
+        context.getSharedPreferences("lumina_secret", Context.MODE_PRIVATE)
+
     // ---- Appearance ---------------------------------------------------------
 
     var themeMode: Int
@@ -78,6 +82,17 @@ class SettingsRepository(context: Context) {
             putBoolean(KEY_CROP, settings.cropBorders)
         }
     }
+
+    // ---- OCR (scanned PDFs) -------------------------------------------------
+
+    var ocrApiKey: String
+        get() = secretPrefs.getString(KEY_OCR_API, "") ?: ""
+        set(value) = secretPrefs.edit { putString(KEY_OCR_API, value) }
+
+    /** 0 = automatic (Engine 3, fallback Engine 2), 3 = Engine 3, 2 = Engine 2. */
+    var ocrMode: Int
+        get() = prefs.getInt(KEY_OCR_MODE, 0)
+        set(value) = prefs.edit { putInt(KEY_OCR_MODE, value) }
 
     // ---- AI narration -------------------------------------------------------
 
@@ -144,6 +159,8 @@ class SettingsRepository(context: Context) {
         private const val KEY_LAYOUT = "reading_layout"
         private const val KEY_VOLUME_PAGES = "volume_pages"
         private const val KEY_CROP = "crop_borders"
+        private const val KEY_OCR_API = "ocr_api_key"
+        private const val KEY_OCR_MODE = "ocr_mode"
         private const val KEY_RATE = "speech_rate"
         private const val KEY_PITCH = "speech_pitch"
         private const val KEY_VOICE = "speech_voice"

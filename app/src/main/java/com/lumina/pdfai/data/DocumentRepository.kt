@@ -5,6 +5,7 @@ import com.lumina.pdfai.ai.ScriptBuilder
 import com.lumina.pdfai.ai.SpeechScript
 import com.lumina.pdfai.pdf.ExtractionResult
 import com.lumina.pdfai.pdf.PdfTextExtractor
+import com.lumina.pdfai.pdf.RawPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,7 +18,10 @@ import kotlinx.coroutines.withContext
  * whole file a second time. Two documents are kept (enough for "recent" jumps)
  * and very large documents are not cached to protect memory.
  */
-class DocumentRepository(private val extractor: PdfTextExtractor) {
+class DocumentRepository(
+    private val extractor: PdfTextExtractor,
+    private val ocrStore: OcrStore
+) {
 
     private data class Cached(
         val extraction: ExtractionResult,
@@ -35,7 +39,8 @@ class DocumentRepository(private val extractor: PdfTextExtractor) {
             inFlight[uri]?.let { return it }
         }
 
-        val result = withContext(Dispatchers.IO) { extractor.extract(android.net.Uri.parse(uri)) }
+        val extracted = withContext(Dispatchers.IO) { extractor.extract(android.net.Uri.parse(uri)) }
+        val result = withContext(Dispatchers.IO) { mergeOcr(uri, extracted) }
         mutex.withLock {
             inFlight.remove(uri)
             put(uri, Cached(result, cache[uri]?.script, cache[uri]?.keepHeaders ?: true))
@@ -69,6 +74,18 @@ class DocumentRepository(private val extractor: PdfTextExtractor) {
             put(uri, Cached(extraction, script, skipHeaders))
         }
         return script
+    }
+
+    /** A scanned PDF has no text layer; use the stored OCR text when it is complete. */
+    private fun mergeOcr(uri: String, raw: ExtractionResult): ExtractionResult {
+        if (raw.hasText) return raw
+        val total = raw.metadata.pageCount
+        if (total <= 0) return raw
+        val texts = ocrStore.loadComplete(uri, total) ?: return raw
+        return raw.copy(
+            pages = texts.mapIndexed { index, text -> RawPage(index, text) },
+            warnings = emptyList()
+        )
     }
 
     suspend fun quickInfo(uri: String): Pair<Int, String> = withContext(Dispatchers.IO) {

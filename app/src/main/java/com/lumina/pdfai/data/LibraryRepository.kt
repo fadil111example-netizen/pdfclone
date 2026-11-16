@@ -80,6 +80,11 @@ class LibraryRepository(
             val existing = _entries.value.associateBy { it.uri }.toMutableMap()
             found.forEach { candidate ->
                 val current = existing[candidate.uri]
+                // the same file may already be known through another uri (picker vs. scan)
+                if (current == null && existing.values.any {
+                        it.name == candidate.name && it.sizeBytes == candidate.sizeBytes
+                    }
+                ) return@forEach
                 existing[candidate.uri] = if (current == null) {
                     candidate
                 } else {

@@ -133,6 +133,22 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Fallback when "all files access" is not granted: import one folder the user picked. */
+    fun importFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            filters.update { it.copy(scanning = true) }
+            val found = runCatching { scanner.scanTree(treeUri) }.getOrDefault(emptyList())
+            if (found.isNotEmpty()) library.addAll(found)
+            filters.update {
+                it.copy(
+                    scanning = false,
+                    message = if (found.isNotEmpty()) "${found.size} PDF ditemukan di folder itu"
+                    else "Tidak ada PDF di folder itu"
+                )
+            }
+        }
+    }
+
     fun remove(uri: String) {
         viewModelScope.launch {
             library.remove(uri)
